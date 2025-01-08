@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-web-app
+  labels:
+    app: my-web-app
+spec:
+  replicas: 4  # Количество реплик для обработки пиковой нагрузки
+  selector:
+    matchLabels:
+      app: my-web-app
+  template:
+    metadata:
+      labels:
+        app: my-web-app
+    spec:
+      containers:
+      - name: my-web-app-container
+        image: my-web-app-image:latest  # Укажите ваш образ
+        resources:
+          requests:
+            cpu: "500m"  # Запрашиваемое количество CPU на старте
+            memory: "128Mi"  # Запрашиваемая память
+          limits:
+            cpu: "1"  # Лимит CPU, чтобы предотвратить чрезмерное использование
+            memory: "128Mi"  # Лимит по памяти
+        readinessProbe:  # Проба готовности для проверки, когда приложение готово принимать трафик
+          httpGet:
+            path: /healthz  # Путь для проверки состояния приложения
+            port: 8080  # Порт, на котором работает приложение
+          initialDelaySeconds: 10  # Время ожидания перед первой проверкой готовности
+          periodSeconds: 5  # Интервал между проверками готовности
+        livenessProbe:  # Проба живучести для перезапуска пода в случае зависания
+          httpGet:
+            path: /healthz  # Путь для проверки состояния приложения
+            port: 8080
+          initialDelaySeconds: 30  # Время ожидания перед первой проверкой живучести
+          periodSeconds: 10  # Интервал между проверками живучести
+      affinity:  # Настройки для распределения подов по узлам
+        podAntiAffinity:  # Обеспечиваем, что поды не будут запущены на одном узле
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - my-web-app
+            topologyKey: "kubernetes.io/hostname"  # Распределение по узлам
+
+---
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: my-web-app-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-web-app
+  minReplicas: 2  # Минимальное количество реплик для снижения потребления ресурсов ночью
+  maxReplicas: 6  # Максимальное количество реплик для обработки пикового трафика
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50  # Автоматическое масштабирование при использовании CPU выше 50%
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-web-app-service
+spec:
+  type: ClusterIP  # Тип сервиса, чтобы обеспечить доступ внутри кластера
+  ports:
+    - port: 80  # Порт, на который будет направлен трафик
+      targetPort: 8080  # Порт, на котором работает приложение внутри пода
+  selector:
+    app: my-web-app
